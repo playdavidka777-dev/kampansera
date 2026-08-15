@@ -1,0 +1,17 @@
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+
+const SUPABASE_URL = "https://fbhxafuxtqpjckgwolkb.supabase.co/rest/v1/";
+
+const SUPABASE_KEY = "sb_publishable_cOSTt09A9Gw7pE81cekL8Q_fTjbWBsq";
+
+const supabaseClient = window.supabase.createClient(
+
+    SUPABASE_URL,
+
+    SUPABASE_KEY
+
+);
+
+</script>
