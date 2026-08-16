@@ -1,0 +1,29 @@
+function createCustomerQR(customerId) {
+    const container = document.getElementById("qr-code");
+
+    if (!container) {
+        console.error("QR-container saknas.");
+        return;
+    }
+
+    container.innerHTML = "";
+
+    const url =
+        `${window.location.origin}/?customer=${encodeURIComponent(customerId)}`;
+
+    new QRCode(container, {
+        text: url,
+        width: 256,
+        height: 256,
+        correctLevel: QRCode.CorrectLevel.H
+    });
+}
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase.js"></script>
+<script src="auth.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="qr.js"></script>
+
+</body>
+</html>
