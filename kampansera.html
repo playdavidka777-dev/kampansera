@@ -149,6 +149,7 @@ p{margin:0}
 .badge-gray{background:#EFF0F6;color:#5A5E74}
 .badge-red{background:var(--bad-soft);color:#DC2626}
 .badge-brand{background:var(--brand-soft);color:var(--brand-strong)}
+.group-code-badge{border:none;cursor:pointer;font:inherit;display:inline-flex;align-items:center;gap:.4rem}
 
 /* ---------- Avatars ---------- */
 .avatar{
@@ -1286,9 +1287,17 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
     return (p ? p.name : "Produkt") + " ×" + item.qty;
   }
 
+  var GROUPS = [
+    {
+      id: "g1", name: "Klass 9B – Kanelbullar", code: "SALT42", goal: 600,
+      memberIds: ["u1", "u2", "u3", "u4", "u5", "u6", "u7"],
+      memberGoals: { u1: 60, u2: 100, u3: 90, u4: 110, u5: 60, u6: 100, u7: 40 }
+    }
+  ];
+
   window.DB = {
     AV_COLORS: AV_COLORS, PUBLIC_BASE: PUBLIC_BASE, PRODUCTS: PRODUCTS, prodById: prodById,
-    ALL_USERS: ALL_USERS, TOTALS: TOTALS, ORDERS: ORDERS,
+    ALL_USERS: ALL_USERS, TOTALS: TOTALS, ORDERS: ORDERS, GROUPS: GROUPS,
     SALES_CHART: SALES_CHART, PERIOD_LABELS: PERIOD_LABELS,
     STATUS_META: STATUS_META, ADMIN_STATS: ADMIN_STATS,
     leaderboard: leaderboard,
@@ -1326,6 +1335,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
     orders: clone(D.ORDERS),
     products: clone(D.PRODUCTS),
     totals: clone(D.TOTALS),
+    groups: clone(D.GROUPS),
     orderSeq: 900,
     rememberedEmail: "",
     memoryReady: false,
@@ -1356,7 +1366,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
   }
   function navTo(path){ location.hash = _sk ? path + "?sk=" + _sk : path; }
   function isProtected(path){
-    return ["/dashboard","/sales","/orders","/products","/qr","/poster","/profile","/settings","/scan","/admin","/notifications"].some(function(p){ return path === p || path.indexOf(p + "/") === 0; });
+    return ["/dashboard","/sales","/orders","/products","/qr","/poster","/profile","/settings","/scan","/admin","/notifications","/group"].some(function(p){ return path === p || path.indexOf(p + "/") === 0; });
   }
   function currentUser(){ return state.user || D.getUserById("u1"); }
   function userTotals(userId){
@@ -1380,6 +1390,61 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
     var row = liveLeaderboard().find(function(r){ return r.user.id === userId; });
     return row ? row.rank : "–";
   }
+
+  /* ---------- Klassgrupper ---------- */
+  function unitsSold(userId){ return userTotals(userId).products; }
+  function findGroupByCode(code){
+    code = String(code||"").trim().toUpperCase();
+    return state.groups.find(function(g){ return g.code === code; });
+  }
+  function findUserGroup(userId){
+    return state.groups.find(function(g){ return g.memberIds.indexOf(userId) !== -1; });
+  }
+  function generateGroupCode(){
+    var chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", code;
+    do {
+      code = "";
+      for(var i=0;i<6;i++) code += chars.charAt(Math.floor(Math.random()*chars.length));
+    } while(findGroupByCode(code));
+    return code;
+  }
+  function groupMemberStats(g){
+    return g.memberIds.map(function(uid){
+      var user = state.users.find(function(u){ return u.id === uid; });
+      if(!user) return null;
+      var t = userTotals(uid);
+      var goal = (g.memberGoals && g.memberGoals[uid]) || 0;
+      return { user: user, sold: t.products, goal: goal, remaining: Math.max(0, goal - t.products), earned: t.total };
+    }).filter(Boolean).sort(function(a,b){ return b.sold - a.sold; });
+  }
+  function groupTotals(g){
+    var rows = groupMemberStats(g);
+    var sold = sum(rows.map(function(r){ return r.sold; }));
+    var revenue = sum(rows.map(function(r){ return r.earned; }));
+    return { sold: sold, goal: g.goal || 0, remaining: Math.max(0, (g.goal||0) - sold), revenue: revenue };
+  }
+  function createGroup(name, goal, myGoal){
+    var u = currentUser();
+    var g = { id: uuid("g"), name: name, code: generateGroupCode(), goal: goal, memberIds: [u.id], memberGoals: {} };
+    g.memberGoals[u.id] = myGoal;
+    state.groups.push(g);
+    return g;
+  }
+  function joinGroup(code, myGoal){
+    var g = findGroupByCode(code);
+    if(!g) return null;
+    var u = currentUser();
+    if(g.memberIds.indexOf(u.id) === -1) g.memberIds.push(u.id);
+    if(!g.memberGoals) g.memberGoals = {};
+    g.memberGoals[u.id] = myGoal;
+    return g;
+  }
+  function leaveGroup(g){
+    var u = currentUser();
+    g.memberIds = g.memberIds.filter(function(id){ return id !== u.id; });
+    if(g.memberGoals) delete g.memberGoals[u.id];
+    if(g.memberIds.length === 0) state.groups = state.groups.filter(function(x){ return x.id !== g.id; });
+  }
   function initials(u){ return D.initials(u); }
   function avatar(u, size, cls){
     return '<span class="avatar avatar-'+(size||"md")+' '+(cls||"")+'" style="background:'+attr(D.colorFor(u))+'" aria-label="'+attr(u.firstName+' '+(u.lastName||""))+'">'+esc(initials(u))+'</span>';
@@ -1397,6 +1462,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
       qr:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h2v2h-2zM19 14h2M14 19h2M18 18h3v3h-3z"/>',
       poster:'<rect x="5" y="3" width="14" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/>',
       user:'<path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/>',
+      group:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
       settings:'<path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2.1 2.1 0 1 1-2.98 2.98l-.05-.05a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.1 1.66V21a2.1 2.1 0 1 1-4.2 0v-.07a1.8 1.8 0 0 0-1.1-1.66 1.8 1.8 0 0 0-1.98.36l-.05.05a2.1 2.1 0 1 1-2.98-2.98l.05-.05A1.8 1.8 0 0 0 3.8 15a1.8 1.8 0 0 0-1.66-1.1H2a2.1 2.1 0 1 1 0-4.2h.07a1.8 1.8 0 0 0 1.66-1.1 1.8 1.8 0 0 0-.36-1.98l-.05-.05a2.1 2.1 0 1 1 2.98-2.98l.05.05a1.8 1.8 0 0 0 1.98.36 1.8 1.8 0 0 0 1.1-1.66V2a2.1 2.1 0 1 1 4.2 0v.07a1.8 1.8 0 0 0 1.1 1.66 1.8 1.8 0 0 0 1.98-.36l.05-.05a2.1 2.1 0 1 1 2.98 2.98l-.05.05a1.8 1.8 0 0 0-.36 1.98 1.8 1.8 0 0 0 1.66 1.1H22a2.1 2.1 0 1 1 0 4.2h-.07A1.8 1.8 0 0 0 19.4 15Z"/>',
       logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
       menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
@@ -1483,6 +1549,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
     var customUsers = state.users.filter(function(x){ return baseUsers.indexOf(x.id) < 0; });
     var profile = u ? { id:u.id, fn:u.firstName, ln:u.lastName, em:u.email, ph:u.phone||"", sl:u.slug, bi:u.bio||"", go:u.goal||3000 } : null;
     var extraOrders = state.orders.filter(function(o){ return /^o9\d+/.test(o.id); }).map(function(o){ return { id:o.id, sid:o.sellerId, d:o.date, n:o.name, e:o.email||"", ph:o.phone||"", i:o.items, a:o.amount, st:o.status }; });
+    var groups = state.groups.map(function(g){ return { i:g.id, n:g.name, c:g.code, g:g.goal, m:g.memberIds, mg:g.memberGoals||{} }; });
     try{
       var mem = {
         uid: u ? u.id : null,
@@ -1490,6 +1557,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
         pu: profile,
         cu: customUsers.map(function(x){ return { id:x.id, fn:x.firstName, ln:x.lastName, em:x.email, ph:x.phone, sl:x.slug, bi:x.bio, co:x.color, ro:x.role, go:x.goal, pw:x.pw }; }),
         eo: extraOrders,
+        gr: groups,
         os: state.orderSeq
       };
       var json = JSON.stringify(mem);
@@ -1517,6 +1585,11 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
       (mem.cu||[]).forEach(function(c){ if(!state.users.find(function(u){return u.id===c.id;})){ state.users.push({ id:c.id, firstName:c.fn, lastName:c.ln, email:c.em, phone:c.ph||"", slug:c.sl, bio:c.bi||"", color:typeof c.co==="number"?c.co:0, role:c.ro||"seller", goal:c.go||3000, memberSince:"2026-08-11", pw:c.pw||"exempel123" }); if(!state.totals[c.id]) state.totals[c.id]={total:0,orders:0,products:0}; } });
       if(mem.pu){ var pu = state.users.find(function(u){return u.id===mem.pu.id;}); if(pu){ pu.firstName=mem.pu.fn||pu.firstName; pu.lastName=mem.pu.ln||pu.lastName; pu.email=mem.pu.em||pu.email; pu.phone=mem.pu.ph||""; pu.slug=mem.pu.sl||pu.slug; pu.bio=mem.pu.bi||pu.bio; pu.goal=mem.pu.go||pu.goal; } }
       (mem.eo||[]).forEach(function(o){ if(!state.orders.find(function(x){return x.id===o.id;})){ state.orders.unshift({ id:o.id, sellerId:o.sid, date:o.d, name:o.n, email:o.e||"", phone:o.ph||"", items:o.i||[], amount:o.a||0, status:o.st||"Mottagen" }); } });
+      (mem.gr||[]).forEach(function(gg){
+        var existing = state.groups.find(function(x){ return x.id===gg.i; });
+        if(existing){ existing.name=gg.n; existing.code=gg.c; existing.goal=gg.g; existing.memberIds=gg.m||[]; existing.memberGoals=gg.mg||{}; }
+        else { state.groups.push({ id:gg.i, name:gg.n, code:gg.c, goal:gg.g, memberIds:gg.m||[], memberGoals:gg.mg||{} }); }
+      });
       if(typeof mem.os === "number") state.orderSeq = Math.max(state.orderSeq, mem.os);
       var user = mem.uid ? state.users.find(function(u){return u.id===mem.uid;}) : null;
       if(user && mem.auth){ state.user = user; state.isAuthed = true; state.rememberedEmail = user.email; }
@@ -1640,7 +1713,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
 
   function navItems(){
     var arr = [
-      ["/dashboard","home","Dashboard"], ["/sales","chart","Försäljning"], ["/orders","orders","Beställningar"], ["/products","box","Produkter"], ["/notifications","bell","Notiser"], ["/qr","qr","Min QR-kod"], ["/poster","poster","Min affisch"], ["/profile","user","Min profil"], ["/scan","scan","Scanna QR"]
+      ["/dashboard","home","Dashboard"], ["/sales","chart","Försäljning"], ["/orders","orders","Beställningar"], ["/products","box","Produkter"], ["/group","group","Klassgrupp"], ["/notifications","bell","Notiser"], ["/qr","qr","Min QR-kod"], ["/poster","poster","Min affisch"], ["/profile","user","Min profil"], ["/scan","scan","Scanna QR"]
     ];
     if(currentUser().role === "admin") arr.push(["/admin","admin","Admin"]);
     return arr;
@@ -1655,7 +1728,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
       + '</nav><div class="side-foot"><a class="nav-item '+(state.route==="/settings"?'active':'')+'" href="#/settings">'+icon("settings",19)+'<span>Inställningar</span></a><button class="nav-item js-logout" type="button">'+icon("logout",19)+'<span>Logga ut</span></button><div class="side-user">'+avatar(u,"sm")+'<div><div class="name">'+esc(u.firstName+' '+u.lastName)+'</div><div class="mail">'+esc(u.email)+'</div></div></div></div></aside><div class="main-col"><header class="topbar"><button class="tb-iconbtn mobile-only" id="open-drawer" aria-label="Öppna meny">'+icon("menu",21)+'</button><div><b>'+esc(routeLabel(state.route))+'</b><div style="font-size:.76rem;color:var(--ink-3)">Kampansera</div></div><div class="tb-right"><button class="tb-iconbtn" id="copy-link-top" aria-label="Kopiera säljlänk">'+icon("copy",19)+'</button><a class="tb-iconbtn" id="notify-btn" href="#/notifications" aria-label="Notiser">'+icon("bell",19)+(unread>0?'<span class="ping"></span>':'')+'</a><button class="tb-user" id="profile-shortcut" type="button">'+avatar(u,"sm")+'<span><span class="nm">'+esc(u.firstName)+'</span><br><span class="rl">'+(u.role==='admin'?'Admin':'Säljare')+'</span></span></button></div></header><main class="content view-enter">'+content+'</main></div>'+bottomNav(items)+'</div>';
   }
   function routeLabel(r){
-    var map={"/dashboard":"Dashboard","/sales":"Försäljning","/orders":"Beställningar","/products":"Produkter","/qr":"Min QR-kod","/poster":"Min affisch","/profile":"Min profil","/settings":"Inställningar","/scan":"Scanna QR","/admin":"Admin","/notifications":"Notiser"};
+    var map={"/dashboard":"Dashboard","/sales":"Försäljning","/orders":"Beställningar","/products":"Produkter","/group":"Klassgrupp","/qr":"Min QR-kod","/poster":"Min affisch","/profile":"Min profil","/settings":"Inställningar","/scan":"Scanna QR","/admin":"Admin","/notifications":"Notiser"};
     return map[r] || "Kampansera";
   }
   function bottomNav(items){
@@ -1753,6 +1826,71 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
       var p = D.prodById(b.dataset.pid); if(!p || p.stockKind === "red") { toast("Produkten är slut i lager.","error"); return; }
       openCheckout(p, seller || currentUser());
     }); });
+  }
+
+  function groupPage(){
+    var u = currentUser(), g = findUserGroup(u.id);
+    pageTitle("Klassgrupp", "Skapa eller gå med i en klassgrupp och följ gruppens försäljning tillsammans.");
+    setTimeout(bindGroupPage,0);
+    if(!g) return shell(groupOnboarding());
+    var rows = groupMemberStats(g), tot = groupTotals(g);
+    return shell(pageHead("Klassgrupp", "Så ligger "+g.name+" till just nu.",
+        '<button class="badge badge-brand group-code-badge" id="group-code-badge" type="button" title="Klicka för att kopiera koden">'+icon("copy",14)+' Kod: '+esc(g.code)+'</button><button class="btn btn-ghost" id="leave-group" type="button">'+icon("logout",18)+' Lämna grupp</button>')
+      + '<div class="grid grid-4"><article class="card stat-card"><div class="stat-ic" style="background:var(--brand-soft);color:var(--brand-strong)">'+icon("box",22)+'</div><span class="stat-lbl">Sålda burkar</span><strong class="stat-val">'+tot.sold+' st</strong><span class="stat-delta">av mål '+tot.goal+' st</span></article><article class="card stat-card"><div class="stat-ic" style="background:var(--ok-soft);color:#0B8F5B">'+icon("target",22)+'</div><span class="stat-lbl">Gruppens mål</span><strong class="stat-val">'+tot.goal+' st</strong><span class="stat-delta">gemensamt mål</span></article><article class="card stat-card"><div class="stat-ic" style="background:var(--accent-soft);color:#B45309">'+icon("chart",22)+'</div><span class="stat-lbl">Burkar kvar</span><strong class="stat-val">'+tot.remaining+' st</strong><span class="stat-delta">till gruppens mål</span></article><article class="card stat-card"><div class="stat-ic" style="background:var(--info-soft);color:#2563EB">'+icon("orders",22)+'</div><span class="stat-lbl">Total intäkt</span><strong class="stat-val">'+D.fmtSEK(tot.revenue)+'</strong><span class="stat-delta">gruppens omsättning</span></article></div>'
+      + '<section class="card mt-3"><div class="card-head"><div><div class="card-title">Gruppens mål</div><div class="card-sub">'+tot.sold+' av '+tot.goal+' burkar sålda</div></div></div><div class="card-pad"><div class="progress"><span class="fill" style="width:'+clamp(tot.goal?Math.round(tot.sold/tot.goal*100):0,0,100)+'%"></span></div></div></section>'
+      + '<section class="card mt-3"><div class="card-head"><div><div class="card-title">Medlemmar</div><div class="card-sub">Alla i '+esc(g.name)+' och hur det går för var och en.</div></div></div><div class="table-wrap"><div class="table-scroll"><table class="tbl"><thead><tr><th>Säljare</th><th>Sålda burkar</th><th>Mål</th><th>Kvar</th><th>Intäkt</th></tr></thead><tbody>'
+      + rows.map(function(r){
+          return '<tr><td><div class="flex" style="align-items:center;gap:.6rem">'+avatar(r.user,"sm")+'<b>'+esc(r.user.firstName+' '+r.user.lastName)+(r.user.id===u.id?' <span class="muted-3">(du)</span>':'')+'</b></div></td><td>'+r.sold+' st</td><td>'+(r.user.id===u.id?'<span class="flex" style="align-items:center;gap:.4rem"><input class="input" id="my-goal-input" type="number" min="0" step="1" value="'+attr(r.goal)+'" style="width:5.5rem;padding:.5rem .7rem"><button class="btn btn-ghost btn-sm" id="save-my-goal" type="button">Spara</button></span>':r.goal+' st')+'</td><td>'+r.remaining+' st</td><td>'+D.fmtSEK(r.earned)+'</td></tr>';
+        }).join("")
+      + '</tbody></table></div></div></section>'
+      + '<section class="card mt-3"><div class="card-head"><div><div class="card-title">Topplista</div><div class="card-sub">Sorterad efter flest sålda burkar i gruppen.</div></div></div>'
+      + rows.map(function(r,i){
+          var cls = i < 3 ? "top" : (r.user.id===u.id ? "me" : "");
+          return '<div class="leader-row"><span class="rank-num '+cls+'">'+(i+1)+'</span>'+avatar(r.user,"sm")+'<div><div class="lr-title">'+esc(r.user.firstName+' '+r.user.lastName)+'</div><div class="lr-cnt">'+r.sold+' sålda burkar</div></div><div class="lr-amt">'+D.fmtSEK(r.earned)+'</div></div>';
+        }).join("")
+      + '</section>');
+  }
+  function groupOnboarding(){
+    return pageHead("Klassgrupp", "Skapa en ny klassgrupp eller gå med i en med en kod från en klasskompis.")
+      + '<div class="grid grid-2 mt-2"><section class="card card-pad"><h3>'+icon("group",19)+' Skapa en ny grupp</h3><p class="muted mt-1">Sätt ett gemensamt försäljningsmål för gruppen och bjud in andra med koden som skapas.</p><form id="create-group-form" class="mt-3" novalidate><div class="field"><label for="cg-name">Gruppens namn</label><input id="cg-name" class="input" required placeholder="T.ex. Klass 9B"></div><div class="grid grid-2 mt-2"><div class="field"><label for="cg-goal">Gruppens gemensamma mål (burkar)</label><input id="cg-goal" class="input" type="number" min="1" step="1" value="300" required></div><div class="field"><label for="cg-mygoal">Ditt personliga mål (burkar)</label><input id="cg-mygoal" class="input" type="number" min="1" step="1" value="50" required></div></div><div class="form-actions mt-2"><button class="btn btn-primary" type="submit">'+icon("check",18)+' Skapa grupp</button></div></form></section>'
+      + '<section class="card card-pad"><h3>'+icon("qr",19)+' Gå med i en grupp</h3><p class="muted mt-1">Fått en kod av en klasskompis eller ledare? Fyll i den här för att gå med.</p><form id="join-group-form" class="mt-3" novalidate><div class="field"><label for="jg-code">Gruppkod</label><input id="jg-code" class="input" required placeholder="T.ex. SALT42" style="text-transform:uppercase"></div><div class="field mt-2"><label for="jg-goal">Ditt personliga mål (burkar)</label><input id="jg-goal" class="input" type="number" min="1" step="1" value="50" required></div><div class="form-actions mt-2"><button class="btn btn-primary" type="submit">'+icon("arrow",15)+' Gå med i grupp</button></div></form></section></div>';
+  }
+  function bindGroupPage(){
+    var cf = $("#create-group-form");
+    if(cf) cf.addEventListener("submit", function(e){
+      e.preventDefault();
+      var name = $("#cg-name").value.trim(), goal = parseInt($("#cg-goal").value,10)||0, myGoal = parseInt($("#cg-mygoal").value,10)||0;
+      if(!name || goal<=0 || myGoal<=0){ toast("Fyll i namn, gruppmål och ditt personliga mål.","error"); return; }
+      var g = createGroup(name, goal, myGoal);
+      saveMemory(); toast("Gruppen \""+g.name+"\" är skapad! Dela koden "+g.code+" med klasskompisar."); navTo("/group"); render();
+    });
+    var jf = $("#join-group-form");
+    if(jf) jf.addEventListener("submit", function(e){
+      e.preventDefault();
+      var code = $("#jg-code").value.trim(), myGoal = parseInt($("#jg-goal").value,10)||0;
+      if(!code || myGoal<=0){ toast("Fyll i en gruppkod och ditt personliga mål.","error"); return; }
+      var g = joinGroup(code, myGoal);
+      if(!g){ toast("Hittade ingen grupp med den koden.","error"); return; }
+      saveMemory(); toast("Du är nu med i \""+g.name+"\"!"); navTo("/group"); render();
+    });
+    var lg = $("#leave-group");
+    if(lg) lg.addEventListener("click", function(){
+      var g = findUserGroup(currentUser().id); if(!g) return;
+      leaveGroup(g); saveMemory(); toast("Du har lämnat gruppen."); render();
+    });
+    var badge = $("#group-code-badge");
+    if(badge) badge.addEventListener("click", function(){
+      var g = findUserGroup(currentUser().id); if(g) copyText(g.code, "Gruppkoden är kopierad!");
+    });
+    var sg = $("#save-my-goal");
+    if(sg) sg.addEventListener("click", function(){
+      var g = findUserGroup(currentUser().id); if(!g) return;
+      var val = parseInt($("#my-goal-input").value,10);
+      if(!val || val<=0){ toast("Ange ett giltigt mål.","error"); return; }
+      if(!g.memberGoals) g.memberGoals = {};
+      g.memberGoals[currentUser().id] = val;
+      saveMemory(); toast("Ditt mål är uppdaterat."); render();
+    });
   }
 
   function qrPage(){
@@ -1934,6 +2072,7 @@ table.tbl{width:100%;border-collapse:collapse;min-width:700px}
     else if(r === "/sales") app.innerHTML = salesPage();
     else if(r === "/orders") app.innerHTML = ordersPage();
     else if(r === "/products") app.innerHTML = productsPage();
+    else if(r === "/group") app.innerHTML = groupPage();
     else if(r === "/qr") app.innerHTML = qrPage();
     else if(r === "/poster") app.innerHTML = posterPage();
     else if(r === "/profile") app.innerHTML = profilePage();
